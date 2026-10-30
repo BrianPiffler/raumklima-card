@@ -12,7 +12,7 @@ Jeder Raum zeigt Name, Ist-Temperatur, Sollwert und Luftfeuchte. Der Hintergrund
 3. Browser bzw. Companion-App neu laden.
 
 ### Manuell
-`raumklima-card.js` nach `/config/www/` kopieren und als Ressource `/local/raumklima-card.js?v=0.1.2` (Typ *JavaScript-Modul*) eintragen.
+`raumklima-card.js` nach `/config/www/` kopieren und als Ressource `/local/raumklima-card.js?v=0.2.0` (Typ *JavaScript-Modul*) eintragen.
 
 ## Konfiguration
 
@@ -28,8 +28,9 @@ floors:
       - name: Büro
         climate: climate.thermostat_better_buro
         humidity: sensor.buro_humidity
+        window: binary_sensor.buro_fenster
         entities:              # zusätzlich im Popup
-          - binary_sensor.buro_fenster
+          - sensor.buro_co2
   - name: OG
     columns: 4
     rooms:
@@ -64,6 +65,7 @@ floors:
 | `climate` | Thermostat. Liefert Ist (`current_temperature`), Soll, Modus und Heizstatus (`hvac_action`) |
 | `temperature` | Eigener Temperatursensor. Ersetzt den Ist-Wert des Thermostats, oder allein für Räume ohne Thermostat |
 | `humidity` | Feuchtesensor. Ohne Sensor oder ohne Wert steht „–%“ in der Kachel |
+| `window` | Fenster-Kontaktsensor (`on` = offen). Ohne Angabe gilt das Attribut `window_open` des Thermostats (z. B. Better Thermostat) |
 | `entities` | Weitere Entitäten, die im Popup gelistet werden |
 | `name` | Anzeigename, sonst `friendly_name` |
 
@@ -71,9 +73,10 @@ Ein Raum braucht `climate` oder `temperature`.
 
 ## Bedienung
 - **Kachel:** Sollwert links (orange = heizt, „Aus" = Thermostat aus), Luftfeuchte rechts.
+- **Fenster offen:** Eine kühle Schraffur zieht durch die Kachel, statt des Sollwerts steht „offen“, die Kopfzeile zählt offene Fenster.
+  Im Popup erklärt ein Hinweis, dass das Thermostat pausiert (mit Uhrzeit, wenn `window:` gesetzt ist); −/+ sind dann gesperrt.
 - **Popup:** −/+ ändert den Sollwert sofort in der Anzeige und schickt `climate.set_temperature` 1 s nach dem letzten Tipp.
-  Heizen/Aus schaltet per `climate.set_hvac_mode`. Meldet das Thermostat `window_open`, steht „Fenster offen" im Popup.
-  „Details in Home Assistant" öffnet den normalen Mehr-Infos-Dialog.
+  Heizen/Aus schaltet per `climate.set_hvac_mode`. „Details in Home Assistant" öffnet den normalen Mehr-Infos-Dialog.
 
 ## Farben anpassen
 Die Farben kommen aus dem HA-Theme (`primary-text-color`, `divider-color`, `primary-color`, `card-background-color`).

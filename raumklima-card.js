@@ -2,7 +2,7 @@
  * Raumklima Card – Stockwerke × Räume mit Temperatur-Farbverlauf und Sollwert-Popup.
  * https://github.com/BrianPiffler/raumklima-card
  */
-const VERSION = '0.1.2';
+const VERSION = '0.2.0';
 const DEFAULT_STOPS = [16, 18, 19.5, 21, 22.5, 24, 26];
 
 // Catppuccin Latte (hell) / Mocha (dunkel); per Theme-Variable --raumklima-* überschreibbar
@@ -93,7 +93,7 @@ class RaumklimaCard extends HTMLElement {
 
   // ---------- Daten ----------
   _entityIds() {
-    return this._config.floors.flatMap((f) => f.rooms.flatMap((r) => [r.climate, r.temperature, r.humidity, ...(r.entities ?? [])])).filter(Boolean);
+    return this._config.floors.flatMap((f) => f.rooms.flatMap((r) => [r.climate, r.temperature, r.humidity, r.window, ...(r.entities ?? [])])).filter(Boolean);
   }
 
   _signature() {
@@ -116,19 +116,26 @@ class RaumklimaCard extends HTMLElement {
     const ts = r.temperature ? h.states[r.temperature] : undefined;
     const cur = ts ? num(ts.state) : num(c?.attributes.current_temperature);
     const hum = r.humidity ? num(h.states[r.humidity]?.state) : null;
-    const base = { cfg: r, cur, hum, name: r.name ?? c?.attributes.friendly_name ?? ts?.attributes.friendly_name ?? r.climate ?? r.temperature };
-    if (!r.climate) return { ...base, kind: 'sensor' };
-    if (!c || c.state === 'unavailable' || c.state === 'unknown') return { ...base, kind: 'unavailable' };
+    // eigener Kontaktsensor hat Vorrang, sonst das window_open-Attribut (z. B. Better Thermostat)
+    const ws = r.window ? h.states[r.window] : undefined;
+    const windowOpen = ws ? ws.state === 'on' : c?.attributes.window_open === true;
+    const base = {
+      cfg: r, cur, hum, windowOpen,
+      windowSince: windowOpen && ws ? new Date(ws.last_changed) : null,
+      name: r.name ?? c?.attributes.friendly_name ?? ts?.attributes.friendly_name ?? r.climate ?? r.temperature,
+    };
+    if (!r.climate) return { ...base, kind: windowOpen ? 'window' : 'sensor' };
+    if (!c || c.state === 'unavailable' || c.state === 'unknown') return { ...base, kind: windowOpen ? 'window' : 'unavailable' };
     const a = c.attributes;
     const target = this._pending[r.climate]?.value ?? num(a.temperature);
     const off = c.state === 'off';
     const heating = !off && (a.hvac_action ? a.hvac_action === 'heating' : cur != null && target != null && cur < target - 0.2);
     return {
       ...base, stateObj: c, target,
-      kind: off ? 'off' : heating ? 'heating' : 'idle',
+      kind: windowOpen ? 'window' : off ? 'off' : heating ? 'heating' : 'idle',
+      hvacOff: off,
       min: num(a.min_temp) ?? 5, max: num(a.max_temp) ?? 30,
       step: num(this._config.step) ?? num(a.target_temp_step) ?? 0.5,
-      windowOpen: a.window_open === true,
     };
   }
 
@@ -169,7 +176,8 @@ class RaumklimaCard extends HTMLElement {
     const nameStyle = this._config.temperature_colors && m.cur != null
       ? ` style="color:color-mix(in oklab, ${this._tempColor(m.cur)} 72%, var(--rc-fg))"` : '';
     let set = '';
-    if (m.kind === 'off') set = '<span class="set">Aus</span>';
+    if (m.kind === 'window') set = '<span class="set">offen</span>';
+    else if (m.kind === 'off') set = '<span class="set">Aus</span>';
     else if (m.kind === 'unavailable') set = '<span class="set">offline</span>';
     else if (m.kind !== 'sensor') set = `<span class="set">${this._fmt(m.target)}°</span>`;
     // immer anzeigen, damit alle Kacheln gleich aufgebaut sind; ohne Wert „–%"
@@ -188,11 +196,12 @@ class RaumklimaCard extends HTMLElement {
     if (this._config.title) {
       const all = floors.flatMap((x) => x.rooms);
       const heating = all.filter((m) => m.kind === 'heating').length;
+      const open = all.filter((m) => m.windowOpen).length;
       const temps = all.map((m) => m.cur).filter((v) => v != null);
       const avg = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
       head = `<div class="head"><ha-icon icon="${esc(this._config.icon ?? 'mdi:thermometer')}"></ha-icon>
         <span class="title">${esc(this._config.title)}</span>
-        <span class="sum">${heating ? `<b>${heating} heizen</b> · ` : ''}Ø ${this._fmt(avg)} °C</span></div>`;
+        <span class="sum">${open ? `<b class="win">${open} Fenster offen</b> · ` : ''}${heating ? `<b>${heating} heizen</b> · ` : ''}Ø ${this._fmt(avg)} °C</span></div>`;
     }
     const grids = floors.map(({ f, rooms }, fi) => {
       const cols = f.columns ?? Math.min(rooms.length, 4);
@@ -286,7 +295,20 @@ const CARD_CSS = `
   .t-meta { display: flex; gap: 5px; font-size: 11px; color: var(--rc-muted); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; min-height: 1.3em; }
   .t-meta .hum { margin-left: auto; }
   .tile.heating .t-meta .set { color: var(--rc-heat); font-weight: 500; }
-  @media (prefers-reduced-motion: reduce) { .tile { transition: none; } }
+  .head .sum .win { color: var(--rc-t2); }
+  /* Fenster offen: kühle Schraffur zieht langsam durch den Raum */
+  .tile.window { position: relative; overflow: hidden; }
+  .tile.window::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    --d: color-mix(in srgb, var(--rc-t2) 18%, transparent);
+    background-image: linear-gradient(45deg, var(--d) 25%, transparent 25%, transparent 50%, var(--d) 50%, var(--d) 75%, transparent 75%);
+    background-size: 14px 14px; animation: rc-draft 1.8s linear infinite;
+    -webkit-mask-image: linear-gradient(transparent, #000 35%, #000 65%, transparent);
+    mask-image: linear-gradient(transparent, #000 35%, #000 65%, transparent);
+  }
+  @keyframes rc-draft { to { background-position: 14px 0; } }
+  .tile.window .t-meta .set { color: var(--rc-t2); font-weight: 500; }
+  @media (prefers-reduced-motion: reduce) { .tile { transition: none; } .tile.window::after { animation: none; } }
 `;
 
 class RaumklimaDialog extends HTMLElement {
@@ -337,8 +359,16 @@ class RaumklimaDialog extends HTMLElement {
       <div class="s-head"><div><h2 id="t">${esc(m.name)}</h2><p>${esc(sub)}</p></div>
       <button class="x" data-act="close" aria-label="Schließen"><ha-icon icon="mdi:close"></ha-icon></button></div>`;
 
+    let banner = '';
+    if (m.windowOpen) {
+      const lang = c._hass.locale?.language ?? navigator.language;
+      const since = m.windowSince ? ` seit ${m.windowSince.toLocaleTimeString(lang, { hour: '2-digit', minute: '2-digit' })}` : '';
+      const resume = m.stateObj
+        ? ` Das Thermostat pausiert und heizt wieder${m.target != null ? ` auf ${c._fmt(m.target)} °C` : ''}, sobald es zu ist.` : '';
+      banner = `<div class="banner"><ha-icon icon="mdi:window-open-variant"></ha-icon><span><b>Fenster${since} offen.</b>${resume}</span></div>`;
+    }
+
     const rows = [];
-    if (m.windowOpen) rows.push(['mdi:window-open-variant', 'Fenster', 'offen', 'warn']);
     if (this.roomCfg.humidity) rows.push(['mdi:water-percent', 'Luftfeuchte', m.hum != null ? `${Math.round(m.hum)} %` : 'nicht verfügbar']);
     if (m.kind !== 'sensor') rows.push(['mdi:thermometer', 'Ist-Temperatur', `${c._fmt(m.cur)} °C`]);
     for (const id of this.roomCfg.entities ?? []) {
@@ -347,13 +377,13 @@ class RaumklimaDialog extends HTMLElement {
       const val = c._hass.formatEntityState ? c._hass.formatEntityState(s) : `${s.state} ${s.attributes.unit_of_measurement ?? ''}`;
       rows.push([s.attributes.icon ?? 'mdi:information-outline', s.attributes.friendly_name ?? id, val]);
     }
-    const rowsHTML = rows.length ? `<div class="rows">${rows.map(([i, l, v, cls]) =>
-      `<div class="row ${cls ?? ''}"><ha-icon icon="${i}"></ha-icon><span>${esc(l)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>` : '';
+    const rowsHTML = rows.length ? `<div class="rows">${rows.map(([i, l, v]) =>
+      `<div class="row"><ha-icon icon="${i}"></ha-icon><span>${esc(l)}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>` : '';
     const more = `<button class="more" data-act="more">Details in Home Assistant</button>`;
 
-    if (m.kind === 'sensor' || m.kind === 'unavailable') {
-      const note = m.kind === 'sensor' ? 'Kein Thermostat in diesem Raum' : 'Thermostat nicht erreichbar';
-      return head + `<div class="sensor-big"><div class="big">${c._fmt(m.cur)}<small> °C</small></div><p>${note}</p></div>` + rowsHTML + more;
+    if (!m.stateObj) {
+      const note = this.roomCfg.climate ? 'Thermostat nicht erreichbar' : 'Kein Thermostat in diesem Raum';
+      return head + banner + `<div class="sensor-big"><div class="big">${c._fmt(m.cur)}<small> °C</small></div><p>${note}</p></div>` + rowsHTML + more;
     }
 
     const R = 96, CX = 120, CY = 120;
@@ -364,10 +394,11 @@ class RaumklimaDialog extends HTMLElement {
     const [sx, sy] = pt(ang(m.min)), [ex, ey] = pt(ang(m.max));
     const arc = `M ${sx} ${sy} A ${R} ${R} 0 1 1 ${ex} ${ey}`;
     const [kx, ky] = pt(ang(m.target)), [cx, cy] = pt(ang(m.cur));
-    const off = m.kind === 'off';
-    const stateText = { heating: 'Heizt', idle: 'Soll erreicht', off: 'Aus' }[m.kind];
+    const win = m.kind === 'window';
+    const off = m.kind === 'off' || win;
+    const stateText = { heating: 'Heizt', idle: 'Soll erreicht', off: 'Aus', window: 'Fenster offen' }[m.kind];
 
-    return head + `
+    return head + banner + `
       <div class="dial ${m.kind}">
         <svg viewBox="0 0 240 240" aria-hidden="true">
           <path class="track" d="${arc}" fill="none" stroke-width="14" stroke-linecap="round"/>
@@ -378,18 +409,18 @@ class RaumklimaDialog extends HTMLElement {
           <text class="ends" x="${ex - 4}" y="${ey + 26}" text-anchor="middle">${m.max}°</text>
         </svg>
         <div class="center"><span class="lab">Soll</span>
-          <span class="big">${off ? 'Aus' : `${c._fmt(m.target)}<small>°C</small>`}</span>
+          <span class="big">${win ? 'Pause' : off ? 'Aus' : `${c._fmt(m.target)}<small>°C</small>`}</span>
           <span class="ist">Ist ${c._fmt(m.cur)} °C</span></div>
       </div>
       <span class="pill ${m.kind}">${stateText}</span>
       <div class="ctrl">
         <button class="btn" data-act="minus" aria-label="Soll niedriger" ${off || m.target <= m.min ? 'disabled' : ''}><ha-icon icon="mdi:minus"></ha-icon></button>
-        <span class="hint">${off ? 'Zum Einstellen auf Heizen schalten' : `Schritt ${c._fmt(m.step)} °C`}</span>
+        <span class="hint">${win ? 'Erst Fenster schließen' : off ? 'Zum Einstellen auf Heizen schalten' : `Schritt ${c._fmt(m.step)} °C`}</span>
         <button class="btn" data-act="plus" aria-label="Soll höher" ${off || m.target >= m.max ? 'disabled' : ''}><ha-icon icon="mdi:plus"></ha-icon></button>
       </div>
       <div class="seg" role="group" aria-label="Modus">
-        <button class="h" data-act="heat" aria-pressed="${!off}"><ha-icon icon="mdi:fire"></ha-icon>Heizen</button>
-        <button data-act="off" aria-pressed="${off}"><ha-icon icon="mdi:power"></ha-icon>Aus</button>
+        <button class="h" data-act="heat" aria-pressed="${!m.hvacOff}"><ha-icon icon="mdi:fire"></ha-icon>Heizen</button>
+        <button data-act="off" aria-pressed="${m.hvacOff}"><ha-icon icon="mdi:power"></ha-icon>Aus</button>
       </div>
       <div class="send ${this._statusKind}" aria-live="polite">${esc(this._status)}</div>` + rowsHTML + more;
   }
@@ -409,7 +440,7 @@ class RaumklimaDialog extends HTMLElement {
       const next = Math.round((m.target + (act === 'plus' ? m.step : -m.step)) / m.step) * m.step;
       c._setTarget(id, Math.min(m.max, Math.max(m.min, next)));
     }
-    if ((act === 'off') !== (m.kind === 'off') && (act === 'heat' || act === 'off')) c._setMode(id, act);
+    if ((act === 'heat' || act === 'off') && (act === 'off') !== m.hvacOff) c._setMode(id, act);
   }
 }
 
@@ -478,7 +509,13 @@ const DIALOG_CSS = `
   .row { display: flex; align-items: center; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--rc-line); font-size: 14px; --mdc-icon-size: 18px; }
   .row ha-icon { color: var(--rc-muted); }
   .row .v { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 500; }
-  .row.warn, .row.warn ha-icon { color: var(--rc-heat); }
+  .banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4;
+    background: color-mix(in srgb, var(--rc-t2) 14%, transparent); border: 1px solid color-mix(in srgb, var(--rc-t2) 40%, transparent); --mdc-icon-size: 18px; }
+  .banner ha-icon { color: var(--rc-t2); flex: none; }
+  .banner b { font-weight: 500; }
+  .dial.window .val { stroke: var(--rc-t2); opacity: .45; }
+  .dial.window .knob { fill: var(--rc-t2); }
+  .pill.window { color: var(--rc-t2); background: color-mix(in srgb, var(--rc-t2) 14%, transparent); }
   .more { justify-self: center; background: none; border: 0; color: var(--rc-accent); font-size: 13px; cursor: pointer; padding: 4px 8px; }
   .sensor-big { justify-self: center; text-align: center; font-variant-numeric: tabular-nums; padding-block: 12px; }
   .sensor-big .big { font-size: 56px; font-weight: 500; line-height: 1; }

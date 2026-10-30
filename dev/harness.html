@@ -21,7 +21,7 @@
 </head>
 <body>
 <main>
-  <div class="bar"><button id="theme">Hell/Dunkel</button><button id="colors">temperature_colors</button></div>
+  <div class="bar"><button id="theme">Hell/Dunkel</button><button id="colors">temperature_colors</button><button id="window">Fenster Büro</button></div>
   <raumklima-card id="card"></raumklima-card>
   <div id="log"></div>
 </main>
@@ -41,7 +41,7 @@
   const states = {
     'climate.thermostat_better_gastezimmer': clim('Gästezimmer', 16.3, 17, 'off', 'off'),
     'climate.thermostat_better_flur_dg': clim('Flur DG', 19.5, 18, 'off', 'off'),
-    'climate.thermostat_better_buro': clim('Büro', 20.8, 21.5, 'heat', 'heating', { window_open: true }),
+    'climate.thermostat_better_buro': clim('Büro', 20.8, 21.5, 'heat', 'off', { window_open: true }),
     'climate.thermostat_better_kinderzimmer': clim('Kinderzimmer', 21.2, 20.5, 'heat', 'idle'),
     'climate.thermostat_better_bad_oben': clim('Bad oben', 21.3, 22, 'heat', 'heating'),
     'climate.thermostat_better_buro_sina': clim('Büro Sina', 18.9, 20, 'off', 'off'),
@@ -53,7 +53,7 @@
     'climate.thermostat_better_kuche': clim('Küche', 22.0, 21.5, 'heat', 'idle'),
     'sensor.motion_sensor_buro_bjorn_humidity': { state: '46', last_updated: '1', attributes: {} },
     'sensor.motion_sensor_wohnzimmer_humidity': { state: '44', last_updated: '1', attributes: {} },
-    'binary_sensor.window_sensor_buro_bjoern_contact': { state: 'off', last_updated: '1', attributes: { friendly_name: 'Tür Büro', icon: 'mdi:door' } },
+    'binary_sensor.window_sensor_buro_bjoern_contact': { state: 'on', last_updated: '1', last_changed: new Date(Date.now() - 12 * 60000).toISOString(), attributes: { friendly_name: 'Fenster Büro' } },
   };
   const log = (t) => { document.getElementById('log').textContent = t + '\n' + document.getElementById('log').textContent; };
   let dark = true;
@@ -76,7 +76,7 @@
         { name: 'Gästezimmer', climate: 'climate.thermostat_better_gastezimmer' },
         { name: 'Flur DG', climate: 'climate.thermostat_better_flur_dg' },
         { name: 'Büro Björn', climate: 'climate.thermostat_better_buro', humidity: 'sensor.motion_sensor_buro_bjorn_humidity',
-          entities: ['binary_sensor.window_sensor_buro_bjoern_contact'] },
+          window: 'binary_sensor.window_sensor_buro_bjoern_contact' },
       ] },
       { name: 'OG', rooms: [
         { name: 'Kinderzimmer', climate: 'climate.thermostat_better_kinderzimmer' },
@@ -95,6 +95,11 @@
   card.setConfig(config);
   push();
   document.getElementById('theme').onclick = () => { dark = !dark; document.documentElement.classList.toggle('light', !dark); push(); };
+  document.getElementById('window').onclick = () => {
+    const id = 'binary_sensor.window_sensor_buro_bjoern_contact';
+    states[id] = { ...states[id], state: states[id].state === 'on' ? 'off' : 'on', last_changed: new Date().toISOString(), last_updated: String(Date.now()) };
+    push();
+  };
   document.getElementById('colors').onclick = () => { config.temperature_colors = !(config.temperature_colors ?? true); card.setConfig({ ...config }); };
 </script>
 </body>
