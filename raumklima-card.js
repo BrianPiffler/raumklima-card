@@ -2,7 +2,7 @@
  * Raumklima Card – Stockwerke × Räume mit Temperatur-Farbverlauf und Sollwert-Popup.
  * https://github.com/BrianPiffler/raumklima-card
  */
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const DEFAULT_STOPS = [16, 18, 19.5, 21, 22.5, 24, 26];
 
 // Catppuccin Latte (hell) / Mocha (dunkel); per Theme-Variable --raumklima-* überschreibbar
@@ -172,8 +172,8 @@ class RaumklimaCard extends HTMLElement {
     if (m.kind === 'off') set = '<span class="set">Aus</span>';
     else if (m.kind === 'unavailable') set = '<span class="set">offline</span>';
     else if (m.kind !== 'sensor') set = `<span class="set">${this._fmt(m.target)}°</span>`;
-    // konfigurierter, aber stummer Sensor zeigt „–%", damit sichtbar bleibt, dass er fehlt
-    const hum = m.cfg.humidity ? `<span class="hum">${m.hum != null ? Math.round(m.hum) : '–'}%</span>` : '';
+    // immer anzeigen, damit alle Kacheln gleich aufgebaut sind; ohne Wert „–%"
+    const hum = `<span class="hum">${m.hum != null ? Math.round(m.hum) : '–'}%</span>`;
     return `<button class="tile ${m.kind}" data-f="${fi}" data-r="${ri}" aria-label="${esc(m.name)}, ${this._fmt(m.cur)} °C">
       <div class="t-name"${nameStyle}>${esc(m.name)}</div>
       <div class="t-temp"><span class="num">${this._fmt(m.cur)}<span class="unit">°C</span></span></div>
