@@ -2,7 +2,7 @@
  * Raumklima Card – Stockwerke × Räume mit Temperatur-Farbverlauf und Sollwert-Popup.
  * https://github.com/BrianPiffler/raumklima-card
  */
-const VERSION = '0.3.0';
+const VERSION = '0.4.0';
 const DEFAULT_STOPS = [16, 18, 19.5, 21, 22.5, 24, 26];
 
 // Catppuccin Latte (hell) / Mocha (dunkel); per Theme-Variable --raumklima-* überschreibbar
@@ -45,6 +45,7 @@ class RaumklimaCard extends HTMLElement {
     this._timers = {};
     this._sig = '';
     this.shadowRoot.addEventListener('click', (e) => {
+      if (e.target.closest('.hist-btn')) return this._toggleHistory();
       const t = e.target.closest('.tile');
       if (t) this._openDialog(+t.dataset.f, +t.dataset.r, t);
     });
@@ -74,6 +75,8 @@ class RaumklimaCard extends HTMLElement {
     this._sig = '';
     this._hist = null;
     this._histFetched = 0;
+    // Kurven standardmäßig aus; der Schalter in der Kopfzeile wird pro Gerät gemerkt
+    try { this._showHist = localStorage.getItem(this._histStoreKey()) === '1'; } catch { this._showHist = false; }
     if (this._hass) this._render();
   }
 
@@ -83,7 +86,7 @@ class RaumklimaCard extends HTMLElement {
     this.toggleAttribute('dark', dark);
     this._dialog?.toggleAttribute('dark', dark);
     this._expirePending();
-    if (this._hours() && Date.now() - this._histFetched > 15 * 60000) this._fetchHistory();
+    if (this._histActive() && Date.now() - this._histFetched > 15 * 60000) this._fetchHistory();
     else this._appendLive();
     const sig = this._signature();
     if (sig !== this._sig) {
@@ -109,6 +112,16 @@ class RaumklimaCard extends HTMLElement {
 
   // ---------- Verlauf ----------
   _hours() { return num(this._config?.history_hours) ?? 0; }
+  _histActive() { return this._hours() > 0 && this._showHist; }
+  _histStoreKey() { return `raumklima-card:history:${this._config?.title ?? ''}`; }
+
+  _toggleHistory() {
+    haptic();
+    this._showHist = !this._showHist;
+    try { localStorage.setItem(this._histStoreKey(), this._showHist ? '1' : '0'); } catch { /* privater Modus o. Ä. */ }
+    if (this._showHist && Date.now() - this._histFetched > 15 * 60000) this._fetchHistory();
+    else this._render();
+  }
   _histKey(r) { return r.history_entity ?? r.temperature ?? r.climate; }
 
   _histValue(r) {
@@ -262,7 +275,7 @@ class RaumklimaCard extends HTMLElement {
     // immer anzeigen, damit alle Kacheln gleich aufgebaut sind; ohne Wert „–%"
     const hum = `<span class="hum">${m.hum != null ? Math.round(m.hum) : '–'}%</span>`;
     return `<button class="tile ${m.kind}" data-f="${fi}" data-r="${ri}" style="--spark:${tint}" aria-label="${esc(m.name)}, ${this._fmt(m.cur)} °C">
-      ${this._hours() ? this._sparkHTML(m.cfg) : ''}
+      ${this._histActive() ? this._sparkHTML(m.cfg) : ''}
       <div class="t-name"${nameStyle}>${esc(m.name)}</div>
       <div class="t-temp"><span class="num">${this._fmt(m.cur)}<span class="unit">°C</span></span></div>
       <div class="t-meta">${set}${hum}</div>
@@ -281,6 +294,8 @@ class RaumklimaCard extends HTMLElement {
       const avg = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;
       head = `<div class="head"><ha-icon icon="${esc(this._config.icon ?? 'mdi:thermometer')}"></ha-icon>
         <span class="title">${esc(this._config.title)}</span>
+        ${this._hours() ? `<button class="hist-btn" aria-pressed="${this._showHist}" aria-label="Verlauf der letzten ${this._hours()} h"
+          title="Verlauf der letzten ${this._hours()} h"><ha-icon icon="mdi:chart-bell-curve-cumulative"></ha-icon></button>` : ''}
         <span class="sum">${open ? `<b class="win">${open} Fenster offen</b> · ` : ''}${heating ? `<b>${heating} heizen</b> · ` : ''}Ø ${this._fmt(avg)} °C</span></div>`;
     }
     const grids = floors.map(({ f, rooms }, fi) => {
@@ -347,7 +362,16 @@ const CARD_CSS = `
   .head { display: flex; align-items: center; gap: 8px; padding-bottom: 4px; color: var(--rc-fg); }
   .head ha-icon { --mdc-icon-size: 20px; color: var(--rc-muted); }
   .head .title { font-size: 17px; font-weight: 500; }
-  .head .sum { margin-left: auto; font-size: 12px; color: var(--rc-muted); font-variant-numeric: tabular-nums; }
+  .hist-btn {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; padding: 0;
+    background: transparent; border: 1px solid var(--rc-line); color: var(--rc-muted); --mdc-icon-size: 16px;
+    transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease; -webkit-tap-highlight-color: transparent;
+  }
+  .hist-btn[aria-pressed="true"] { color: var(--rc-accent); border-color: color-mix(in srgb, var(--rc-accent) 50%, transparent);
+    background: color-mix(in srgb, var(--rc-accent) 14%, transparent); }
+  .hist-btn:active { transform: scale(.92); }
+  .hist-btn:focus-visible { outline: 2px solid var(--rc-accent); outline-offset: 2px; }
+  .head .sum { margin-left: auto; text-align: right; font-size: 12px; color: var(--rc-muted); font-variant-numeric: tabular-nums; }
   .head .sum b { color: var(--rc-heat); font-weight: 500; }
   .grid {
     display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
