@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Raumklima Card – Harness</title>
+<style>
+  /* HA-Theme-Variablen, angelehnt an Catppuccin Mocha */
+  html { --primary-text-color: #cdd6f4; --secondary-text-color: #a6adc8; --divider-color: #313244; --primary-color: #b4befe;
+         --card-background-color: #1e1e2e; --error-color: #f38ba8; }
+  html.light { --primary-text-color: #4c4f69; --secondary-text-color: #6c6f85; --divider-color: #ccd0da; --primary-color: #7287fd;
+         --card-background-color: #eff1f5; }
+  body { margin: 0; padding: 16px; background: #11111b; font-family: Roboto, system-ui, sans-serif; }
+  html.light body { background: #dce0e8; }
+  main { max-width: 400px; margin: 0 auto; display: grid; gap: 12px; }
+  ha-card { display: block; background: var(--card-background-color); border-radius: 12px; border: 1px solid var(--divider-color); }
+  ha-icon { display: inline-block; width: var(--mdc-icon-size, 24px); height: var(--mdc-icon-size, 24px); }
+  .bar { display: flex; gap: 8px; }
+  #log { font: 12px monospace; color: #a6adc8; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<main>
+  <div class="bar"><button id="theme">Hell/Dunkel</button><button id="colors">temperature_colors</button></div>
+  <raumklima-card id="card"></raumklima-card>
+  <div id="log"></div>
+</main>
+<script>
+  // ha-card/ha-icon-Stubs, damit die Karte ohne HA-Frontend rendert
+  customElements.define('ha-card', class extends HTMLElement {});
+  customElements.define('ha-icon', class extends HTMLElement {});
+</script>
+<script type="module">
+  import '../raumklima-card.js';
+
+  const clim = (name, cur, target, state, action, extra = {}) => ({
+    entity_id: '', state, last_updated: String(Math.random()),
+    attributes: { friendly_name: name, current_temperature: cur, temperature: target, hvac_action: action,
+      min_temp: 5, max_temp: 30.5, target_temp_step: 0.5, hvac_modes: ['heat', 'off'], ...extra },
+  });
+  const states = {
+    'climate.thermostat_better_gastezimmer': clim('Gästezimmer', 16.3, 17, 'off', 'off'),
+    'climate.thermostat_better_flur_dg': clim('Flur DG', 19.5, 18, 'off', 'off'),
+    'climate.thermostat_better_buro': clim('Büro', 20.8, 21.5, 'heat', 'heating', { window_open: true }),
+    'climate.thermostat_better_kinderzimmer': clim('Kinderzimmer', 21.2, 20.5, 'heat', 'idle'),
+    'climate.thermostat_better_bad_oben': clim('Bad oben', 21.3, 22, 'heat', 'heating'),
+    'climate.thermostat_better_buro_sina': clim('Büro Sina', 18.9, 20, 'off', 'off'),
+    'sensor.shelly_thermometer_schlafzimmer_temperature': { state: '17.8', last_updated: '1', attributes: { friendly_name: 'Schlafzimmer' } },
+    'sensor.shelly_thermometer_schlafzimmer_humidity': { state: '55', last_updated: '1', attributes: {} },
+    'climate.thermostat_better_wohnzimmer': clim('Wohnzimmer', 22.8, 22, 'heat', 'idle'),
+    'climate.thermostat_better_bad_unten': { state: 'unavailable', last_updated: '1', attributes: { friendly_name: 'Bad unten' } },
+    'climate.thermostat_better_flur_eg': clim('Flur EG', 20.3, 19, 'off', 'off'),
+    'climate.thermostat_better_kuche': clim('Küche', 22.0, 21.5, 'heat', 'idle'),
+    'sensor.motion_sensor_buro_bjorn_humidity': { state: '46', last_updated: '1', attributes: {} },
+    'sensor.motion_sensor_wohnzimmer_humidity': { state: '44', last_updated: '1', attributes: {} },
+    'binary_sensor.window_sensor_buro_bjoern_contact': { state: 'off', last_updated: '1', attributes: { friendly_name: 'Tür Büro', icon: 'mdi:door' } },
+  };
+  const log = (t) => { document.getElementById('log').textContent = t + '\n' + document.getElementById('log').textContent; };
+  let dark = true;
+  const card = document.getElementById('card');
+  const push = () => { card.hass = { states: { ...states }, themes: { darkMode: dark }, locale: { language: 'de' }, callService }; };
+  async function callService(domain, service, data) {
+    log(`${domain}.${service} ${JSON.stringify(data)}`);
+    const s = states[data.entity_id];
+    const attrs = { ...s.attributes };
+    let state = s.state;
+    if (service === 'set_temperature') attrs.temperature = data.temperature;
+    if (service === 'set_hvac_mode') { state = data.hvac_mode; attrs.hvac_action = data.hvac_mode === 'off' ? 'off' : 'heating'; }
+    setTimeout(() => { states[data.entity_id] = { ...s, state, attributes: attrs, last_updated: String(Date.now()) }; push(); }, 400);
+  }
+
+  const config = {
+    title: 'Thermostate',
+    floors: [
+      { name: 'DG', rooms: [
+        { name: 'Gästezimmer', climate: 'climate.thermostat_better_gastezimmer' },
+        { name: 'Flur DG', climate: 'climate.thermostat_better_flur_dg' },
+        { name: 'Büro Björn', climate: 'climate.thermostat_better_buro', humidity: 'sensor.motion_sensor_buro_bjorn_humidity',
+          entities: ['binary_sensor.window_sensor_buro_bjoern_contact'] },
+      ] },
+      { name: 'OG', rooms: [
+        { name: 'Kinderzimmer', climate: 'climate.thermostat_better_kinderzimmer' },
+        { name: 'Bad oben', climate: 'climate.thermostat_better_bad_oben' },
+        { name: 'Büro Sina', climate: 'climate.thermostat_better_buro_sina' },
+        { name: 'Schlafzimmer', temperature: 'sensor.shelly_thermometer_schlafzimmer_temperature', humidity: 'sensor.shelly_thermometer_schlafzimmer_humidity' },
+      ] },
+      { name: 'EG', rooms: [
+        { name: 'Wohnzimmer', climate: 'climate.thermostat_better_wohnzimmer', humidity: 'sensor.motion_sensor_wohnzimmer_humidity' },
+        { name: 'Bad unten', climate: 'climate.thermostat_better_bad_unten' },
+        { name: 'Flur EG', climate: 'climate.thermostat_better_flur_eg' },
+        { name: 'Küche', climate: 'climate.thermostat_better_kuche' },
+      ] },
+    ],
+  };
+  card.setConfig(config);
+  push();
+  document.getElementById('theme').onclick = () => { dark = !dark; document.documentElement.classList.toggle('light', !dark); push(); };
+  document.getElementById('colors').onclick = () => { config.temperature_colors = !(config.temperature_colors ?? true); card.setConfig({ ...config }); };
+</script>
+</body>
+</html>
