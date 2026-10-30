@@ -2,7 +2,7 @@
  * Raumklima Card – Stockwerke × Räume mit Temperatur-Farbverlauf und Sollwert-Popup.
  * https://github.com/BrianPiffler/raumklima-card
  */
-const VERSION = '0.1.0';
+const VERSION = '0.1.1';
 const DEFAULT_STOPS = [16, 18, 19.5, 21, 22.5, 24, 26];
 
 // Catppuccin Latte (hell) / Mocha (dunkel); per Theme-Variable --raumklima-* überschreibbar
@@ -172,7 +172,8 @@ class RaumklimaCard extends HTMLElement {
     if (m.kind === 'off') set = '<span class="set">Aus</span>';
     else if (m.kind === 'unavailable') set = '<span class="set">offline</span>';
     else if (m.kind !== 'sensor') set = `<span class="set">${this._fmt(m.target)}°</span>`;
-    const hum = m.hum != null ? `<span class="hum">${Math.round(m.hum)}%</span>` : '';
+    // konfigurierter, aber stummer Sensor zeigt „–%", damit sichtbar bleibt, dass er fehlt
+    const hum = m.cfg.humidity ? `<span class="hum">${m.hum != null ? Math.round(m.hum) : '–'}%</span>` : '';
     return `<button class="tile ${m.kind}" data-f="${fi}" data-r="${ri}" aria-label="${esc(m.name)}, ${this._fmt(m.cur)} °C">
       <div class="t-name"${nameStyle}>${esc(m.name)}</div>
       <div class="t-temp"><span class="num">${this._fmt(m.cur)}<span class="unit">°C</span></span></div>
@@ -338,7 +339,7 @@ class RaumklimaDialog extends HTMLElement {
 
     const rows = [];
     if (m.windowOpen) rows.push(['mdi:window-open-variant', 'Fenster', 'offen', 'warn']);
-    if (m.hum != null) rows.push(['mdi:water-percent', 'Luftfeuchte', `${Math.round(m.hum)} %`]);
+    if (this.roomCfg.humidity) rows.push(['mdi:water-percent', 'Luftfeuchte', m.hum != null ? `${Math.round(m.hum)} %` : 'nicht verfügbar']);
     if (m.kind !== 'sensor') rows.push(['mdi:thermometer', 'Ist-Temperatur', `${c._fmt(m.cur)} °C`]);
     for (const id of this.roomCfg.entities ?? []) {
       const s = c._hass.states[id];

@@ -12,7 +12,7 @@ Jeder Raum zeigt Name, Ist-Temperatur, Sollwert und Luftfeuchte. Der Hintergrund
 3. Browser bzw. Companion-App neu laden.
 
 ### Manuell
-`raumklima-card.js` nach `/config/www/` kopieren und als Ressource `/local/raumklima-card.js?v=0.1.0` (Typ *JavaScript-Modul*) eintragen.
+`raumklima-card.js` nach `/config/www/` kopieren und als Ressource `/local/raumklima-card.js?v=0.1.1` (Typ *JavaScript-Modul*) eintragen.
 
 ## Konfiguration
 
@@ -63,7 +63,7 @@ floors:
 |---|---|
 | `climate` | Thermostat. Liefert Ist (`current_temperature`), Soll, Modus und Heizstatus (`hvac_action`) |
 | `temperature` | Eigener Temperatursensor. Ersetzt den Ist-Wert des Thermostats, oder allein für Räume ohne Thermostat |
-| `humidity` | Feuchtesensor |
+| `humidity` | Feuchtesensor. Liefert er keinen Wert, steht „–%“ in der Kachel |
 | `entities` | Weitere Entitäten, die im Popup gelistet werden |
 | `name` | Anzeigename, sonst `friendly_name` |
 
