@@ -53,12 +53,33 @@
     'climate.thermostat_better_kuche': clim('Küche', 22.0, 21.5, 'heat', 'idle'),
     'sensor.motion_sensor_buro_bjorn_humidity': { state: '46', last_updated: '1', attributes: {} },
     'sensor.motion_sensor_wohnzimmer_humidity': { state: '44', last_updated: '1', attributes: {} },
+    'sensor.wohnzimmer_temperatur': { state: '22.8', last_updated: '1', attributes: {} },
     'binary_sensor.window_sensor_buro_bjoern_contact': { state: 'on', last_updated: '1', last_changed: new Date(Date.now() - 12 * 60000).toISOString(), attributes: { friendly_name: 'Fenster Büro' } },
   };
   const log = (t) => { document.getElementById('log').textContent = t + '\n' + document.getElementById('log').textContent; };
   let dark = true;
   const card = document.getElementById('card');
-  const push = () => { card.hass = { states: { ...states }, themes: { darkMode: dark }, locale: { language: 'de' }, callService }; };
+  const push = () => { card.hass = { states: { ...states }, themes: { darkMode: dark }, locale: { language: 'de' }, callService, callWS }; };
+  // Simulierte Recorder-History im komprimierten Format von history/history_during_period
+  async function callWS(msg) {
+    log(`callWS ${msg.type} ${msg.entity_ids.length} Entitäten, Attribute: ${!msg.no_attributes}`);
+    const start = Date.parse(msg.start_time) / 1000, end = Date.parse(msg.end_time) / 1000;
+    const out = {};
+    for (const id of msg.entity_ids) {
+      const s = states[id];
+      const cur = parseFloat(id.startsWith('climate.') ? s?.attributes.current_temperature : s?.state);
+      if (!Number.isFinite(cur)) { out[id] = []; continue; }
+      const seed = [...id].reduce((a, c) => a * 31 + c.charCodeAt(0), 7) % 997;
+      const f = (x) => (0.5 + (seed % 9) / 10) * Math.sin(x * Math.PI * 1.5 + seed % 6);
+      out[id] = Array.from({ length: 49 }, (_, i) => {
+        const v = Math.round((cur + f(i / 48) - f(1)) * 10) / 10;
+        const lu = start + (end - start) * i / 48;
+        return id.startsWith('climate.') ? { s: s.state, a: { current_temperature: v }, lu } : { s: String(v), lu };
+      });
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    return out;
+  }
   async function callService(domain, service, data) {
     log(`${domain}.${service} ${JSON.stringify(data)}`);
     const s = states[data.entity_id];
@@ -85,7 +106,8 @@
         { name: 'Schlafzimmer', temperature: 'sensor.shelly_thermometer_schlafzimmer_temperature', humidity: 'sensor.shelly_thermometer_schlafzimmer_humidity' },
       ] },
       { name: 'EG', rooms: [
-        { name: 'Wohnzimmer', climate: 'climate.thermostat_better_wohnzimmer', humidity: 'sensor.motion_sensor_wohnzimmer_humidity' },
+        { name: 'Wohnzimmer', climate: 'climate.thermostat_better_wohnzimmer', humidity: 'sensor.motion_sensor_wohnzimmer_humidity',
+          history_entity: 'sensor.wohnzimmer_temperatur' },
         { name: 'Bad unten', climate: 'climate.thermostat_better_bad_unten' },
         { name: 'Flur EG', climate: 'climate.thermostat_better_flur_eg' },
         { name: 'Küche', climate: 'climate.thermostat_better_kuche' },

@@ -2,7 +2,7 @@
  * Raumklima Card – Stockwerke × Räume mit Temperatur-Farbverlauf und Sollwert-Popup.
  * https://github.com/BrianPiffler/raumklima-card
  */
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const DEFAULT_STOPS = [16, 18, 19.5, 21, 22.5, 24, 26];
 
 // Catppuccin Latte (hell) / Mocha (dunkel); per Theme-Variable --raumklima-* überschreibbar
@@ -69,8 +69,11 @@ class RaumklimaCard extends HTMLElement {
     if (config.color_stops && (!Array.isArray(config.color_stops) || config.color_stops.length !== 7)) {
       throw new Error('raumklima-card: "color_stops" braucht genau 7 Temperaturen');
     }
-    this._config = { temperature_colors: true, ...config };
+    if (config.history_hours != null && !(num(config.history_hours) >= 0)) throw new Error('raumklima-card: "history_hours" muss eine Zahl ≥ 0 sein');
+    this._config = { temperature_colors: true, history_hours: 12, ...config };
     this._sig = '';
+    this._hist = null;
+    this._histFetched = 0;
     if (this._hass) this._render();
   }
 
@@ -80,6 +83,8 @@ class RaumklimaCard extends HTMLElement {
     this.toggleAttribute('dark', dark);
     this._dialog?.toggleAttribute('dark', dark);
     this._expirePending();
+    if (this._hours() && Date.now() - this._histFetched > 15 * 60000) this._fetchHistory();
+    else this._appendLive();
     const sig = this._signature();
     if (sig !== this._sig) {
       this._sig = sig;
@@ -93,13 +98,86 @@ class RaumklimaCard extends HTMLElement {
 
   // ---------- Daten ----------
   _entityIds() {
-    return this._config.floors.flatMap((f) => f.rooms.flatMap((r) => [r.climate, r.temperature, r.humidity, r.window, ...(r.entities ?? [])])).filter(Boolean);
+    return this._config.floors.flatMap((f) => f.rooms.flatMap((r) => [r.climate, r.temperature, r.humidity, r.window, r.history_entity, ...(r.entities ?? [])])).filter(Boolean);
   }
 
   _signature() {
     const h = this._hass;
     return this._entityIds().map((id) => h.states[id]?.last_updated ?? '-').join('|')
       + (h.themes?.darkMode ? 'd' : 'l') + (h.locale?.language ?? '');
+  }
+
+  // ---------- Verlauf ----------
+  _hours() { return num(this._config?.history_hours) ?? 0; }
+  _histKey(r) { return r.history_entity ?? r.temperature ?? r.climate; }
+
+  _histValue(r) {
+    const id = this._histKey(r);
+    const s = this._hass.states[id];
+    return id === r.climate && !r.history_entity && !r.temperature ? num(s?.attributes.current_temperature) : num(s?.state);
+  }
+
+  // Sensoren ohne Attribute (klein); Thermostate brauchen die Attribute für current_temperature
+  async _fetchHistory() {
+    if (this._histLoading) return;
+    this._histLoading = true;
+    this._histFetched = Date.now();
+    const end = new Date();
+    const start = new Date(end.getTime() - this._hours() * 3600000);
+    const rooms = this._config.floors.flatMap((f) => f.rooms);
+    const sensors = [...new Set(rooms.map((r) => r.history_entity ?? r.temperature).filter(Boolean))];
+    const climates = [...new Set(rooms.filter((r) => !r.history_entity && !r.temperature && r.climate).map((r) => r.climate))];
+    const req = (ids, attrs) => (ids.length ? this._hass.callWS({
+      type: 'history/history_during_period', start_time: start.toISOString(), end_time: end.toISOString(),
+      entity_ids: ids, minimal_response: !attrs, no_attributes: !attrs, significant_changes_only: attrs,
+    }) : Promise.resolve({}));
+    try {
+      const [s, c] = await Promise.all([req(sensors, false), req(climates, true)]);
+      const hist = {};
+      for (const [id, rows] of Object.entries({ ...s, ...c })) {
+        const isClimate = climates.includes(id);
+        let last = null;
+        hist[id] = rows.map((row) => {
+          last = isClimate ? num(row.a?.current_temperature) ?? last : num(row.s);
+          return { t: (row.lu ?? row.lc) * 1000, v: last };
+        }).filter((p) => p.v != null && Number.isFinite(p.t));
+      }
+      this._hist = hist;
+    } catch (err) {
+      console.warn('raumklima-card: Verlauf nicht ladbar', err);
+    } finally {
+      this._histLoading = false;
+      this._sig = '';
+      this._render();
+    }
+  }
+
+  _appendLive() {
+    if (!this._hist) return;
+    const now = Date.now();
+    const cutoff = now - this._hours() * 3600000;
+    for (const r of this._config.floors.flatMap((f) => f.rooms)) {
+      const v = this._histValue(r);
+      if (v == null) continue;
+      const arr = (this._hist[this._histKey(r)] ??= []);
+      if (arr[arr.length - 1]?.v !== v) arr.push({ t: now, v });
+      while (arr.length > 1 && arr[1].t < cutoff) arr.shift();
+    }
+  }
+
+  // Zeitachse echt (unregelmäßige Messpunkte), eigene Skala pro Raum mit mindestens 2 °C Spanne
+  _sparkHTML(r) {
+    const arr = this._hist?.[this._histKey(r)];
+    if (!arr?.length) return '';
+    const now = Date.now();
+    const start = now - this._hours() * 3600000;
+    const pts = arr.map((p) => [Math.max(p.t, start), p.v]);
+    pts.push([now, pts[pts.length - 1][1]]);
+    let lo = Math.min(...pts.map((p) => p[1]));
+    let hi = Math.max(...pts.map((p) => p[1]));
+    if (hi - lo < 2) { const m = (hi + lo) / 2; lo = m - 1; hi = m + 1; }
+    const line = 'M' + pts.map(([t, v]) => `${((t - start) / (now - start) * 100).toFixed(2)},${(38 - (v - lo) / (hi - lo) * 32).toFixed(2)}`).join(' L');
+    return `<svg class="spark" viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path class="a" d="${line} L100,40 L0,40 Z"/><path class="l" d="${line}"/></svg>`;
   }
 
   _expirePending() {
@@ -173,8 +251,9 @@ class RaumklimaCard extends HTMLElement {
 
   // ---------- Darstellung ----------
   _tileHTML(m, fi, ri) {
-    const nameStyle = this._config.temperature_colors && m.cur != null
-      ? ` style="color:color-mix(in oklab, ${this._tempColor(m.cur)} 72%, var(--rc-fg))"` : '';
+    const colored = this._config.temperature_colors && m.cur != null;
+    const tint = colored ? `color-mix(in oklab, ${this._tempColor(m.cur)} 72%, var(--rc-fg))` : 'var(--rc-muted)';
+    const nameStyle = colored ? ` style="color:${tint}"` : '';
     let set = '';
     if (m.kind === 'window') set = '<span class="set">offen</span>';
     else if (m.kind === 'off') set = '<span class="set">Aus</span>';
@@ -182,7 +261,8 @@ class RaumklimaCard extends HTMLElement {
     else if (m.kind !== 'sensor') set = `<span class="set">${this._fmt(m.target)}°</span>`;
     // immer anzeigen, damit alle Kacheln gleich aufgebaut sind; ohne Wert „–%"
     const hum = `<span class="hum">${m.hum != null ? Math.round(m.hum) : '–'}%</span>`;
-    return `<button class="tile ${m.kind}" data-f="${fi}" data-r="${ri}" aria-label="${esc(m.name)}, ${this._fmt(m.cur)} °C">
+    return `<button class="tile ${m.kind}" data-f="${fi}" data-r="${ri}" style="--spark:${tint}" aria-label="${esc(m.name)}, ${this._fmt(m.cur)} °C">
+      ${this._hours() ? this._sparkHTML(m.cfg) : ''}
       <div class="t-name"${nameStyle}>${esc(m.name)}</div>
       <div class="t-temp"><span class="num">${this._fmt(m.cur)}<span class="unit">°C</span></span></div>
       <div class="t-meta">${set}${hum}</div>
@@ -283,7 +363,12 @@ const CARD_CSS = `
     padding: 7px 9px 6px; display: grid; grid-template-rows: auto 1fr auto; gap: 1px; min-width: 0;
     transition: box-shadow 120ms ease; -webkit-tap-highlight-color: transparent;
   }
+  .tile { position: relative; isolation: isolate; overflow: hidden; }
   .tile + .tile { border-left: 1px solid var(--rc-line); }
+  /* Verlauf hinter dem Inhalt; width explizit, sonst gibt das viewBox-Seitenverhältnis die Breite vor */
+  .spark { position: absolute; left: 0; bottom: 0; width: 100%; height: 62%; z-index: -1; pointer-events: none; }
+  .spark .a { fill: var(--spark); opacity: .08; }
+  .spark .l { fill: none; stroke: var(--spark); stroke-width: 1.25; opacity: .45; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
   .tile:active { box-shadow: inset 0 0 0 100vmax color-mix(in srgb, var(--rc-fg) 8%, transparent); }
   .tile:focus-visible { outline: 2px solid var(--rc-accent); outline-offset: -2px; }
   .t-name { font-size: 11.5px; font-weight: 500; letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -297,7 +382,6 @@ const CARD_CSS = `
   .tile.heating .t-meta .set { color: var(--rc-heat); font-weight: 500; }
   .head .sum .win { color: var(--rc-t2); }
   /* Fenster offen: kühle Schraffur zieht langsam durch den Raum */
-  .tile.window { position: relative; overflow: hidden; }
   .tile.window::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     --d: color-mix(in srgb, var(--rc-t2) 18%, transparent);

@@ -12,7 +12,7 @@ Jeder Raum zeigt Name, Ist-Temperatur, Sollwert und Luftfeuchte. Der Hintergrund
 3. Browser bzw. Companion-App neu laden.
 
 ### Manuell
-`raumklima-card.js` nach `/config/www/` kopieren und als Ressource `/local/raumklima-card.js?v=0.2.0` (Typ *JavaScript-Modul*) eintragen.
+`raumklima-card.js` nach `/config/www/` kopieren und als Ressource `/local/raumklima-card.js?v=0.3.0` (Typ *JavaScript-Modul*) eintragen.
 
 ## Konfiguration
 
@@ -47,6 +47,7 @@ floors:
 | `title` | – | Kopfzeile mit Anzahl heizender Räume und Durchschnitt |
 | `icon` | `mdi:thermometer` | Icon der Kopfzeile |
 | `temperature_colors` | `true` | Temperatur-Farbverlauf an/aus |
+| `history_hours` | `12` | Dezenter Temperaturverlauf im Kachel-Hintergrund über so viele Stunden, `0` = aus |
 | `color_stops` | `[16, 18, 19.5, 21, 22.5, 24, 26]` | 7 Temperaturen für Blau → Sapphire → Teal → Grün → Gelb → Peach → Rot |
 | `step` | vom Thermostat | Schrittweite im Popup |
 
@@ -66,6 +67,7 @@ floors:
 | `temperature` | Eigener Temperatursensor. Ersetzt den Ist-Wert des Thermostats, oder allein für Räume ohne Thermostat |
 | `humidity` | Feuchtesensor. Ohne Sensor oder ohne Wert steht „–%“ in der Kachel |
 | `window` | Fenster-Kontaktsensor (`on` = offen). Ohne Angabe gilt das Attribut `window_open` des Thermostats (z. B. Better Thermostat) |
+| `history_entity` | Sensor für den Verlauf. Ohne Angabe: `temperature`, sonst `current_temperature` des Thermostats (lädt mehr Daten, weil Attribute mitkommen) |
 | `entities` | Weitere Entitäten, die im Popup gelistet werden |
 | `name` | Anzeigename, sonst `friendly_name` |
 
@@ -73,6 +75,8 @@ Ein Raum braucht `climate` oder `temperature`.
 
 ## Bedienung
 - **Kachel:** Sollwert links (orange = heizt, „Aus" = Thermostat aus), Luftfeuchte rechts.
+- **Verlauf:** Feine Kurve der letzten `history_hours` Stunden hinter Temperatur und Sollwert, in der Farbe des Raumnamens.
+  Geladen einmal aus dem Recorder (alle 15 min neu), dazwischen mit jedem neuen Messwert fortgeschrieben.
 - **Fenster offen:** Eine kühle Schraffur zieht durch die Kachel, statt des Sollwerts steht „offen“, die Kopfzeile zählt offene Fenster.
   Im Popup erklärt ein Hinweis, dass das Thermostat pausiert (mit Uhrzeit, wenn `window:` gesetzt ist); −/+ sind dann gesperrt.
 - **Popup:** −/+ ändert den Sollwert sofort in der Anzeige und schickt `climate.set_temperature` 1 s nach dem letzten Tipp.
